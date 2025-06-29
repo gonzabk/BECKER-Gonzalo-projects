@@ -1,0 +1,95 @@
+%%Predictive coding
+%%1. Load video
+%%2. Choose a period: IBBPBBPBBPBBI
+%%3. Apply JPEG to I frames (after choosing a period k=10)
+%%4. Calculate P frames using surrounding I or P frames (Motion compensation):
+%%4.1 Prediction by block similarity, followed by motion compensation
+%%4.2 DCT of error image + quantization + entropic coding
+%%5. Calculate B frames using surrounding I or P frames :
+%%5.1 Two predictions by block similarity, followed by motion compensation
+%%5.2 DCT of error image (with respect to image(t-1), image(t+1) or the average of the two predictions)
+%% + quantization + entropic coding
+
+
+
+%%Load the video
+% Filename
+file = 'news.qcif';
+
+% Open the file
+fid = fopen(file,'r');
+
+[matY, matU, matV, fCount] = extractFrames(fid);
+
+%Choosing the I-period ki
+ki=12;
+i_indices=[];
+
+%Start by encoding the I frames
+ for i = 1:ki:fCount
+    i_indices = [i_indices, i];
+    %%Apply JPEG to matY[:,:,i]
+    % Get the current frame
+    Image = matY(:,:,i);
+    
+    % Upsample U and V matrices to match the size of the Y matrix
+    ImageU = imresize(matU(:,:,i), size(Image));
+    ImageV = imresize(matV(:,:,i), size(Image));
+
+    % JPEG compression
+    [coded_im, rs, rs_pairs, HK, HL, Q_mat, pixelCount] = JPEG(Image, Q);
+
+    % JPEG decompression
+    decoded_im = JPEG_Decomp(coded_im, rs, rs_pairs, HK, HL, Q_mat, pixelCount);
+    
+    % Add U, V, then reconvert to RGB
+    YUV = cat(3, decoded_im, ImageU, ImageV);
+    im_decomp = ycbcr2rgb(uint8(YUV));
+    
+    % Store decompressed frame in cell array
+    decompressed_frames{i} = im_decomp;
+ end
+
+%Choosing the P-period kp
+kp=3;
+p_indices=[];
+
+%Using Block Matching Algorithms for Motion Estimation
+%We use Adaptive Rood Pattern Search method which is the fastest one
+%We fix the search parameter p and the size of the macroblocks
+p=7; mbSize=16;
+
+%Calculate the P frames
+for ip = 1:kp:fCount
+  if ~ismember(ip, i_indices)
+    %Find the index of the reference image I(t-1)
+    t_1 = find(i_indices < ip, 1, 'last');
+    %Calculate the motion vectors for each macroblock
+    [motionVect, ARPScomputations] = motionEstARPS(matY(:,:,ip),matY(:,:,t_1),mbSize,p);
+    %Calculate motion compensated image
+    imgComp = motionComp(matY(:,:,t_1), motionVect, mbSize);
+    %DCT, quantization and entropic coding (Apply JPEG directly?) on error image
+    %Add to p_indices
+    p_indices = [p_indices, ip];
+  end
+end
+
+%Calculate the B frames
+for b = 1:fCount
+  if (~ismember(b, i_indices) && ~ismember(b,p_indices)) %Remaining frames
+    %Find the index of the reference image I(t-1)
+    t_1 = max(find(i_indices < b, 1, 'last'),find(p_indices < b, 1, 'last'));
+    %Calculate the motion vectors for each macroblock
+    [motionVect1, ARPScomputations] = motionEstARPS(matY(:,:,b),matY(:,:,t_1),mbSize,p);
+    %Calculate first motion compensated image
+    imgComp1 = motionComp(matY(:,:,t_1), motionVect1, mbSize);
+    %Find the index of the reference image I(t+1)
+    tp1 = min(find(i_indices > b, 1, 'first'),find(p_indices > b, 1, 'first'));
+    %Repeat the same calculations, (however imgB is the reference image this time
+    %and we take the inverse of the motion vectors? maybe, not sure)
+    [motionVect2, ARPScomputations] = motionEstARPS(matY(:,:,b),matY(:,:,tp1),mbSize,p);
+    %Calculate second motion compensated image
+    imgComp2 = motionComp(matY(:,:,tp1), motionVect2, mbSize);
+    %
+  end
+end

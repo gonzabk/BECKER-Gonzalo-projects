@@ -1,0 +1,32 @@
+clear 
+close all
+
+% Filename
+file = 'news.qcif';
+%Quality coefficient
+Q = 50;
+
+% Open the file
+fid = fopen(file,'r');
+
+[matY, matU, matV, fCount] = extractFrames(fid);
+
+for frame = 1:fCount
+    
+    Image = matY(:,:,f);
+    % Upsample U and V matrices to match the size of the Y matrix
+    ImageU = imresize(matU(:,:,1), size(Image));
+    ImageV = imresize(matV(:,:,1), size(Image));
+
+    %JPEG compression
+    [coded_im, rs, rs_pairs, HK, HL, Q_mat, pixelCount] = JPEG(Image, Q);
+
+    %JPEG decompression
+    decoded_im = JPEG_Decomp(coded_im, rs, rs_pairs, HK, HL, Q_mat, pixelCount);
+
+end
+
+%Display
+figure
+imagesc(decoded_im);
+colormap(gray);
